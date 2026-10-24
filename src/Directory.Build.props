@@ -1,0 +1,13 @@
+﻿<Project>
+	<PropertyGroup>
+		<Product>Multi Reproductor Multimedia</Product>
+		<Company>Multi Reproductor Multimedia</Company>
+		<Authors>Multi Reproductor Multimedia</Authors>
+		<Description>Reproductor de video, audio e imagenes basado en mpv.</Description>
+		<Nullable>enable</Nullable>
+		<!-- .NET 10 marca los binarios como CET-compatible por defecto, pero el
+			runtime aborta (0x80131506 "doesn't fully support CET") en Win10
+			builds < 22000. Forzamos off para que arranque en cualquier Win10. -->
+		<CETCompat>false</CETCompat>
+	</PropertyGroup>
+</Project>

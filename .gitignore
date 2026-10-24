@@ -1,0 +1,34 @@
+# Compilados
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Publicación local
+reproductor-multimedia/
+publish/
+Out/
+
+# Salidas temporales de herramientas
+tools/out/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Paquetes
+packages/
+*.nupkg
+
+# Sistema
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Varios
+*.pdb
+*.log
