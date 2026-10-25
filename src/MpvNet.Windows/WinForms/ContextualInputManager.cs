@@ -103,10 +103,10 @@ public class ContextualInputManager
         switch (e.KeyCode)
         {
             case Keys.Left:
-                Player.Command("playlist-prev");
+                _mainForm.NavigatePlaylist(-1);
                 return true;
             case Keys.Right:
-                Player.Command("playlist-next");
+                _mainForm.NavigatePlaylist(1);
                 return true;
             case Keys.Add:
             case Keys.Oemplus:

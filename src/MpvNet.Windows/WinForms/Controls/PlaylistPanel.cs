@@ -55,7 +55,7 @@ public class PlaylistPanel : UserControl
                 return;
 
             foreach (string file in ofd.FileNames)
-                Player.CommandV("loadfile", file, "append");
+                Player.CommandV("loadfile", MainPlayer.PrepareFileForPlayback(file), "append");
         };
 
         _btnRemove.Click += (s, e) =>

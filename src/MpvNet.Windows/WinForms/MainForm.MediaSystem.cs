@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using MpvNet;
+using MpvNet.Extensions;
 using MpvNet.Windows.WinForms.Controls;
 using static MpvNet.Windows.Native.WinApi;
 
@@ -9,6 +10,18 @@ namespace MpvNet.Windows.WinForms;
 
 public partial class MainForm
 {
+    // la ventana es fija: al cambiar de foto, vídeo o audio no se redimensiona ni
+    // se recoloca; mpv hace letterbox dentro de MediaArea y el contenido va centrado
+    public static readonly bool FixedWindowSize = true;
+    public const int FixedWindowWidth = 1206;
+    public const int FixedWindowHeight = 742;
+
+    // Windows Fotos no encadena el auto-repeat de la flecha; con 350 ms se ve cada
+    // foto antes de pasar a la siguiente
+    const int ImageNavDelayMs = 350;
+
+    long _lastImageNav;
+
     PlaylistPanel? _playlistPanel;
     MediaTypeDetector? _mediaTypeDetector;
     MediaControlsContainer? _mediaControlsContainer;
@@ -38,7 +51,6 @@ public partial class MainForm
         _mediaControlsContainer.Height = (int)(MediaControlBar.LogicalHeight * (DeviceDpi / 96f));
 
         Controls.Add(_mediaControlsContainer);
-        MinimumSize = new Size(800, 600 + _mediaControlsContainer.Height);
 
         _contextualInputManager = new ContextualInputManager(this);
         _mediaTypeDetector.MediaTypeChanged += OnMediaTypeChanged;
@@ -116,6 +128,38 @@ public partial class MainForm
         _uiUpdateTimer?.Stop();
     }
 
+    void ApplyFixedWindowSize()
+    {
+        if (!FixedWindowSize || WindowState != FormWindowState.Normal || Player.Fullscreen)
+            return;
+
+        Size target = new(FixedWindowWidth, FixedWindowHeight);
+
+        // mínimo y máximo iguales: el borde no permite agrandar ni encoger y el
+        // tamaño ya no depende del vídeo o de la foto que se abra
+        MinimumSize = target;
+        MaximumSize = target;
+
+        // maximizar dejaría la ventana pegada a una esquina, así que se quita el botón
+        MaximizeBox = false;
+
+        if (Size != target)
+            Size = target;
+
+        CenterWindowOnScreen();
+    }
+
+    // en pantalla completa el máximo fijo recortaría la ventana; se suelta mientras
+    // dura y se vuelve a poner al salir
+    void UnlockFixedWindowSize()
+    {
+        if (!FixedWindowSize)
+            return;
+
+        MinimumSize = Size.Empty;
+        MaximumSize = new Size(int.MaxValue, int.MaxValue);
+    }
+
     // Al abrir una imagen se centra el área donde mpv pinta, no la ventana entera:
     // la barra inferior descentraba la foto unos píxeles hacia arriba.
     void CenterWindowOnScreen()
@@ -124,6 +168,16 @@ public partial class MainForm
             return;
 
         Rectangle area = Screen.FromControl(this).WorkingArea;
+
+        // con tamaño fijo se centra la ventana completa: así abrir o cerrar la lista
+        // de reproducción no la desplaza a un lado
+        if (FixedWindowSize)
+        {
+            Left = area.X + (area.Width - Width) / 2;
+            Top = area.Y + (area.Height - Height) / 2;
+            return;
+        }
+
         Point mediaCenter = _mediaArea.PointToScreen(new Point(_mediaArea.Width / 2, _mediaArea.Height / 2));
 
         Left += area.X + area.Width / 2 - mediaCenter.X;
@@ -162,8 +216,8 @@ public partial class MainForm
         var videoControls = GetVideoControlBar();
         var audioControls = GetAudioControlBar();
 
-        imageControls?.PreviousClicked += () => Player.Command("playlist-prev");
-        imageControls?.NextClicked += () => Player.Command("playlist-next");
+        imageControls?.PreviousClicked += () => NavigatePlaylist(-1);
+        imageControls?.NextClicked += () => NavigatePlaylist(1);
         imageControls?.ZoomInClicked += () => _contextualInputManager?.ZoomBy(0.1);
         imageControls?.ZoomOutClicked += () => _contextualInputManager?.ZoomBy(-0.1);
         imageControls?.ZoomFitClicked += () => _contextualInputManager?.ResetView();
@@ -222,6 +276,22 @@ public partial class MainForm
             }
         };
         audioControls?.PlaylistClicked += TogglePlaylistPanel;
+    }
+
+    public void NavigatePlaylist(int direction)
+    {
+        // la detección del tipo va aparte y puede llegar tarde; la extensión no
+        if (FileTypes.IsImage(Player.Path.Ext))
+        {
+            long now = Environment.TickCount64;
+
+            if (now - _lastImageNav < ImageNavDelayMs)
+                return;
+
+            _lastImageNav = now;
+        }
+
+        Player.Command(direction < 0 ? "playlist-prev" : "playlist-next");
     }
 
     void ToggleFullscreen() => Player.Command("cycle fullscreen");

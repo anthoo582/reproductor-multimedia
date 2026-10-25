@@ -1,6 +1,7 @@
 
 using System.Drawing;
 using System.Globalization;
+using System.Media;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,10 +62,8 @@ public partial class MainForm : Form
             Player.FileLoaded += Player_FileLoaded;
             Player.EndFile += (reason) =>
             {
-                if (reason != mpv_end_file_reason.MPV_END_FILE_REASON_ERROR)
-                    return;
-
-                BeginInvoke(() => Msg.ShowError(_("This format is not supported by the current player.")));
+                if (reason == mpv_end_file_reason.MPV_END_FILE_REASON_ERROR)
+                    BeginInvoke(() => Msg.ShowError(_("This format is not supported by the current player.")));
             };
             Player.Pause += Player_Pause;
             Player.PlaylistPosChanged += Player_PlaylistPosChanged;
@@ -89,6 +88,8 @@ public partial class MainForm : Form
             Player.ObservePropertyBool("keepaspect-window", value => Player.KeepaspectWindow = value);
             Player.ObservePropertyBool("ontop", PropChangeOnTop);
             Player.ObservePropertyBool("title-bar", PropChangeTitleBar);
+            // con keep-open mpv no manda end-file, así que el final se detecta aquí
+            Player.ObservePropertyBool("eof-reached", PropChangeEofReached);
 
             Player.ObservePropertyString("sid", PropChangeSid);
             Player.ObservePropertyString("aid", PropChangeAid);
@@ -195,6 +196,22 @@ public partial class MainForm : Form
 
     void Player_Shutdown() => BeginInvoke(Close);
 
+    void PropChangeEofReached(bool value)
+    {
+        if (value)
+            BeginInvoke(PlayEndSound);
+    }
+
+    void PlayEndSound()
+    {
+        // con keep-open mpv se queda en el último cuadro; el sonido avisa de que
+        // terminó y la lista no sigue sola con el siguiente audio o vídeo
+        if (FileTypes.IsImage(Player.Path.Ext))
+            return;
+
+        SystemSounds.Asterisk.Play();
+    }
+
     void Player_VideoSizeChanged(Size value) => BeginInvoke(() =>
     {
         if (!KeepSize())
@@ -223,6 +240,9 @@ public partial class MainForm : Form
 
     void GuiCommand_MoveWindow(string direction)
     {
+        if (FixedWindowSize)
+            return;
+
         BeginInvoke(() => {
             Screen screen = Screen.FromControl(this);
             Rectangle workingArea = GetWorkingArea(Handle, screen.WorkingArea);
@@ -548,6 +568,10 @@ public partial class MainForm : Form
 
     void SetFormPosAndSize(bool force = false, bool checkAutofit = true, bool load = false)
     {
+        // con tamaño fijo nada de esto debe tocar la ventana al cambiar de medio
+        if (FixedWindowSize)
+            return;
+
         if (!force)
         {
             if (WindowState != FormWindowState.Normal)
@@ -656,6 +680,9 @@ public partial class MainForm : Form
 
     void SetSize(int width, int height, Screen screen, bool checkAutofit = true, bool load = false)
     {
+        if (FixedWindowSize)
+            return;
+
         Rectangle workingArea = GetWorkingArea(Handle, screen.WorkingArea);
 
         int maxHeight = workingArea.Height - (Height - ClientSize.Height) - 2;
@@ -788,6 +815,7 @@ public partial class MainForm : Form
         {
             if (WindowState != FormWindowState.Maximized || FormBorderStyle != FormBorderStyle.None)
             {
+                UnlockFixedWindowSize();
                 FormBorderStyle = FormBorderStyle.None;
                 WindowState = FormWindowState.Maximized;
 
@@ -804,19 +832,13 @@ public partial class MainForm : Form
         {
             if (WindowState == FormWindowState.Maximized && FormBorderStyle == FormBorderStyle.None)
             {
-                if (_wasMaximized)
-                    WindowState = FormWindowState.Maximized;
-                else
-                {
-                    WindowState = FormWindowState.Normal;
-
-                    if (!Player.WasInitialSizeSet)
-                        SetFormPosAndSize();
-                }
-
+                _wasMaximized = false;
+                WindowState = FormWindowState.Normal;
                 FormBorderStyle = Player.Border ? FormBorderStyle.Sizable : FormBorderStyle.None;
 
-                if (!KeepSize())
+                if (FixedWindowSize)
+                    ApplyFixedWindowSize();
+                else if (!KeepSize())
                     SetFormPosAndSize();
             }
         }
@@ -917,8 +939,8 @@ public partial class MainForm : Form
             // mpv arrastra video-zoom y el pan al siguiente archivo; cada uno empieza encuadrado
             _contextualInputManager?.ResetView();
 
-            if (FileTypes.IsImage(Player.Path.Ext))
-                CenterWindowOnScreen();
+            // la ventana es fija y va centrada también al cambiar a vídeo o audio
+            CenterWindowOnScreen();
 
             // leer la lista de pistas consulta mpv una vez por pista y no hace falta
             // tener la UI esperando justo después de abrir un archivo
@@ -928,6 +950,7 @@ public partial class MainForm : Form
         string path = Player.GetPropertyString("path");
 
         path = MainPlayer.ConvertFilePath(path);
+        path = MainPlayer.GetOriginalPath(path);
 
         if (path.Contains("://"))
         {
@@ -1278,7 +1301,7 @@ public partial class MainForm : Form
                             break;
                         case "queue":
                             foreach (string file in args)
-                                Player.CommandV("loadfile", file, "append");
+                                Player.CommandV("loadfile", MainPlayer.PrepareFileForPlayback(file), "append");
                             break;
                         case "command":
                             Player.Command(args[0]);
@@ -1445,7 +1468,11 @@ public partial class MainForm : Form
     {
         base.OnLoad(e);
         _lastCycleFullscreen = Environment.TickCount;
-        SetFormPosAndSize(false, true, true);
+
+        if (FixedWindowSize)
+            ApplyFixedWindowSize();
+        else
+            SetFormPosAndSize(false, true, true);
     }
 
     protected override void OnLostFocus(EventArgs e)
@@ -1460,6 +1487,9 @@ public partial class MainForm : Form
 
         if (WindowState == FormWindowState.Maximized)
             Player.SetPropertyBool("window-maximized", true);
+
+        if (FixedWindowSize)
+            ApplyFixedWindowSize();
 
         WpfApplication.Init();
         Theme.UpdateWpfColors();
@@ -1532,7 +1562,8 @@ public partial class MainForm : Form
     {
         base.OnMouseMove(e);
 
-        if (IsCursorPosDifferent(_mouseDownLocation) &&
+        if (!FixedWindowSize &&
+            IsCursorPosDifferent(_mouseDownLocation) &&
             WindowState == FormWindowState.Normal &&
             e.Button == MouseButtons.Left && !IsMouseInOsc() && MediaType != MediaType.Image &&
             _contextualInputManager?.IsPanning != true &&

@@ -38,11 +38,16 @@ public static class FileTypes
     public static string[] GetImgExts()
     {
         string exts = Player.GetPropertyString("image-exts");
+        string[] list = string.IsNullOrEmpty(exts)
+            ? ["jpg", "bmp", "png", "gif", "webp"]
+            : exts.Split(" ,;".ToCharArray(), StringSplitOptions.RemoveEmptyEntries);
 
-        if (string.IsNullOrEmpty(exts))
-            return ["jpg", "bmp", "png", "gif", "webp"];
+        // mpv no trae svg en image-exts porque no lo decodifica; nosotros lo
+        // rasterizamos antes de encolarlo, así que para el reproductor es imagen
+        if (!list.Contains("svg"))
+            list = [.. list, "svg"];
 
-        return exts.Split(" ,;".ToCharArray(), StringSplitOptions.RemoveEmptyEntries);
+        return list;
     }
 
     public static bool IsMedia(string[] exts, string ext) =>

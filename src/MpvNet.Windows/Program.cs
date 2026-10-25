@@ -20,6 +20,9 @@ static class Program
             RegistryHelp.ProductName = AppInfo.Product;
             Translator.Current = new WpfTranslator();
 
+            // el núcleo no conoce el renderizador; aquí enchufamos el de Windows
+            MainPlayer.SvgToPng = SvgImageRenderer.Render;
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 

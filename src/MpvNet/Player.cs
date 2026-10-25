@@ -18,6 +18,37 @@ namespace MpvNet;
 
 public class MainPlayer : MpvClient
 {
+    // el núcleo no depende de System.Drawing: la capa Windows enchufa aquí el
+    // rasterizador de SVG y devuelve la ruta del PNG generado
+    public static Func<string, string?>? SvgToPng { get; set; }
+
+    static readonly Dictionary<string, string> PlaybackPathMap = new(StringComparer.OrdinalIgnoreCase);
+    static readonly object PlaybackPathMapLock = new();
+
+    // libmpv no reproduce SVG: se convierte a PNG antes de encolarlo y se guarda
+    // la equivalencia para que la ruta original siga siendo la que ve el usuario
+    public static string PrepareFileForPlayback(string file)
+    {
+        if (SvgToPng == null || file.Ext != "svg")
+            return file;
+
+        string? png = SvgToPng(file);
+
+        if (string.IsNullOrEmpty(png))
+            return file;
+
+        lock (PlaybackPathMapLock)
+            PlaybackPathMap[png] = file;
+
+        return png;
+    }
+
+    public static string GetOriginalPath(string playbackPath)
+    {
+        lock (PlaybackPathMapLock)
+            return PlaybackPathMap.TryGetValue(playbackPath, out string? original) ? original : playbackPath;
+    }
+
     public string ConfPath { get => ConfigFolder + "mpv.conf"; }
     public string GPUAPI { get; set; } = "auto";
     public string Path { get; set; } = "";
@@ -117,6 +148,11 @@ public class MainPlayer : MpvClient
 
         // las imágenes no se autodetienen: la navegación entre carpetas la lleva la playlist
         SetPropertyString("image-display-duration", "inf");
+
+        // al acabar un vídeo o un audio no se salta al siguiente de la lista: se
+        // queda en el último cuadro y la interfaz avisa con un sonido
+        SetPropertyString("keep-open", "always");
+        SetPropertyString("keep-open-pause", "yes");
         SetPropertyString("config-dir", ConfigFolder);
         SetPropertyString("config", "yes");
         
@@ -162,6 +198,11 @@ public class MainPlayer : MpvClient
         // otherwise shutdown is raised before media files are loaded,
         // this means Lua scripts that use idle might not work correctly
         SetPropertyString("idle", "yes");
+
+        // el mpv.conf del usuario puede pisar lo de arriba; se reafirma con mpv ya iniciado
+        SetPropertyString("keep-open", "always");
+        SetPropertyString("keep-open-pause", "yes");
+        SetPropertyString("image-display-duration", "inf");
 
         SetPropertyString("user-data/frontend/name", "MultiReproductorMultimedia");
         SetPropertyString("user-data/frontend/version", AppInfo.Version.ToString());
@@ -383,7 +424,7 @@ public class MainPlayer : MpvClient
     // executed before OnFileLoaded
     protected override void OnStartFile()
     {
-        Path = GetPropertyString("path");
+        Path = GetOriginalPath(GetPropertyString("path"));
         base.OnStartFile();
         TaskHelp.Run(LoadFolder);
     }
@@ -444,6 +485,7 @@ public class MainPlayer : MpvClient
                 file = file[..file.IndexOf("|")];
 
             file = ConvertFilePath(file);
+            file = PrepareFileForPlayback(file);
 
             string ext = file.Ext;
 
@@ -532,7 +574,9 @@ public class MainPlayer : MpvClient
 
         lock (LoadFolderLockObject)
         {
-            string path = GetPropertyString("path");
+            // si es un SVG, mpv informa el PNG del cache; la carpeta se arma con
+            // el archivo original para no duplicar el que ya está sonando
+            string path = GetOriginalPath(GetPropertyString("path"));
 
             if (!File.Exists(path) || GetPropertyInt("playlist-count") != 1)
                 return;
@@ -554,7 +598,7 @@ public class MainPlayer : MpvClient
             files.Remove(path);
 
             foreach (string file in files)
-                CommandV("loadfile", file, "append");
+                CommandV("loadfile", PrepareFileForPlayback(file), "append");
 
             if (index > 0)
                 CommandV("playlist-move", "0", (index + 1).ToString());

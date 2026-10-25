@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
@@ -11,6 +11,10 @@
 		<UseWPF>true</UseWPF>
 		<UseWindowsForms>true</UseWindowsForms>
 		<ApplicationIcon>app-icon.ico</ApplicationIcon>
+
+		<!-- en Windows 10 / 11 sin la actualización de CET el exe de .NET 10
+		     aborta al arrancar; el resto de la app no depende de esa mitigación -->
+		<CETCompat>false</CETCompat>
 
 		<!-- arranque y consumo: sin servidor GC, con tiered JIT y R2R cuando se
 		     publica para un RID concreto, que es donde se nota el arranque en frío -->
@@ -52,6 +56,7 @@
 	<ItemGroup>
 		<PackageReference Include="CommunityToolkit.Mvvm" />
 		<PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" />
+		<PackageReference Include="Svg" />
 	</ItemGroup>
 
 </Project>
